@@ -9,6 +9,9 @@
 #include <string>
 #include <vector>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 // ===== Vertex Shader =====
 const char* vertexShaderSource = R"(
 #version 330 core
@@ -38,13 +41,71 @@ precision mediump float;
 in vec3 v_normal;
 in vec2 v_texCoord;
 
+uniform sampler2D textureSampler;
+
 layout(location = 0) out vec4 fragColor;
 
 void main() {
-    vec3 n = normalize(v_normal);
-    fragColor = vec4(0.5 * n + 0.5, 1.0);
+    fragColor = texture(textureSampler, v_texCoord);
 }
 )";
+
+// ===== Camera Class =====
+class Camera {
+public:
+    glm::vec3 position;
+    float yaw;
+    float pitch;
+    float sensitivity;
+
+    Camera() : position(0.0f, 0.0f, 5.0f), yaw(-90.0f), pitch(0.0f), sensitivity(0.1f) {}
+
+    glm::mat4 GetViewMatrix() {
+        glm::vec3 front;
+        front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+        front.y = sin(glm::radians(pitch));
+        front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+        glm::vec3 cameraFront = glm::normalize(front);
+        return glm::lookAt(position, position + cameraFront, glm::vec3(0.0f, 1.0f, 0.0f));
+    }
+
+    void ProcessMouseMovement(float xoffset, float yoffset) {
+        xoffset *= sensitivity;
+        yoffset *= sensitivity;
+
+        yaw += xoffset;
+        pitch += yoffset;
+
+        if (pitch > 89.0f) pitch = 89.0f;
+        if (pitch < -89.0f) pitch = -89.0f;
+    }
+};
+
+// Global camera instance
+Camera camera;
+
+// Mouse state
+float lastX = 400.0f, lastY = 300.0f;
+bool firstMouse = true;
+
+// Mouse callback
+void mouse_callback(GLFWwindow*, double xpos, double ypos) {
+    float xposf = static_cast<float>(xpos);
+    float yposf = static_cast<float>(ypos);
+
+    if (firstMouse) {
+        lastX = xposf;
+        lastY = yposf;
+        firstMouse = false;
+    }
+
+    float xoffset = xposf - lastX;
+    float yoffset = lastY - yposf; // reversed since y-coordinates range from bottom to top
+    lastX = xposf;
+    lastY = yposf;
+
+    camera.ProcessMouseMovement(xoffset, yoffset);
+}
 
 // ===== Vertex/ObjData =====
 struct Vertex {
@@ -55,7 +116,7 @@ struct Vertex {
 
 struct ObjData {
     std::vector<Vertex> vertices;
-    std::vector<unsigned short> indices;
+    std::vector<unsigned int> indices;
 };
 
 // ===== OBJ Loader (v/vt/vn, v//vn, v 지원) =====
@@ -127,7 +188,7 @@ bool loadOBJ(const std::string& filename, ObjData& objData) {
                     v.tex = glm::vec2(0.0f, 0.0f);
 
                 objData.vertices.push_back(v);
-                return (unsigned short)(objData.vertices.size() - 1);
+                return (unsigned int)(objData.vertices.size() - 1);
             };
 
             objData.indices.push_back(parseVertex(v1));
@@ -144,6 +205,43 @@ bool loadOBJ(const std::string& filename, ObjData& objData) {
     std::cout << "  Triangles: " << objData.indices.size() / 3 << "\n";
 
     return !objData.vertices.empty() && !objData.indices.empty();
+}
+
+// ===== Texture Loader =====
+unsigned int loadTexture(const std::string& filename) {
+    unsigned int textureID;
+    glGenTextures(1, &textureID);
+
+    int width, height, nrChannels;
+    stbi_set_flip_vertically_on_load(true);
+    unsigned char* data = stbi_load(filename.c_str(), &width, &height, &nrChannels, 0);
+
+    if (data) {
+        GLenum format = GL_RGB;
+        if (nrChannels == 1)
+            format = GL_RED;
+        else if (nrChannels == 3)
+            format = GL_RGB;
+        else if (nrChannels == 4)
+            format = GL_RGBA;
+
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        stbi_image_free(data);
+        std::cout << "Loaded texture: " << filename << " (" << width << "x" << height << ", " << nrChannels << " channels)\n";
+    } else {
+        std::cout << "Failed to load texture: " << filename << std::endl;
+        stbi_image_free(data);
+    }
+
+    return textureID;
 }
 
 // ===== Shader / Program =====
@@ -200,6 +298,10 @@ int main(int argc, char* argv[]) {
     }
     glfwMakeContextCurrent(window);
 
+    // Setup mouse input
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         std::cout << "Failed to initialize GLAD\n";
         return -1;
@@ -221,6 +323,11 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
+    // Load texture
+    unsigned int texture = loadTexture("textures/cat.jpg");
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
     unsigned int VAO, VBO, EBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -236,7 +343,7 @@ int main(int argc, char* argv[]) {
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                 (GLsizeiptr)(objData.indices.size() * sizeof(unsigned short)),
+                 (GLsizeiptr)(objData.indices.size() * sizeof(unsigned int)),
                  objData.indices.data(),
                  GL_STATIC_DRAW);
 
@@ -255,13 +362,21 @@ int main(int argc, char* argv[]) {
     int worldMatLoc = glGetUniformLocation(program, "worldMat");
     int viewMatLoc  = glGetUniformLocation(program, "viewMat");
     int projMatLoc  = glGetUniformLocation(program, "projMat");
+    int textureLoc  = glGetUniformLocation(program, "textureSampler");
+
+    // Bind texture to texture unit 0
+    glUniform1i(textureLoc, 0);
 
     glm::mat4 worldMatrix, viewMatrix, projMatrix;
 
     std::cout << "\n=== Controls ===\n";
+    std::cout << "Mouse: Look around\n";
     std::cout << "ESC: exit\n";
 
     while (!glfwWindowShouldClose(window)) {
+        // Time for animation
+        float currentFrame = static_cast<float>(glfwGetTime());
+
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
 
@@ -271,16 +386,15 @@ int main(int argc, char* argv[]) {
         glUseProgram(program);
         glBindVertexArray(VAO);
 
-        // --- World: 스케일만, 회전/이동 없이 (먼저 보이게 하기) ---
+        // --- World: 위치 낮추기 + 자동 회전 + 세우기 ---
         worldMatrix = glm::mat4(1.0f);
+        worldMatrix = glm::translate(worldMatrix, glm::vec3(0.0f, -1.5f, 0.0f)); // 고양이를 아래로
+        worldMatrix = glm::rotate(worldMatrix, currentFrame * glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f)); // Y축 자동 회전
+        worldMatrix = glm::rotate(worldMatrix, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)); // X축으로 세우기
         worldMatrix = glm::scale(worldMatrix, glm::vec3(0.05f));
 
-        // --- View: 고정 카메라 (0,0,5에서 원점 바라봄) ---
-        viewMatrix = glm::lookAt(
-            glm::vec3(0.0f, 0.0f, 5.0f),
-            glm::vec3(0.0f, 0.0f, 0.0f),
-            glm::vec3(0.0f, 1.0f, 0.0f)
-        );
+        // --- View: 마우스로 제어되는 카메라 ---
+        viewMatrix = camera.GetViewMatrix();
 
         // --- Projection ---
         projMatrix = glm::perspective(glm::radians(45.0f),
@@ -293,7 +407,7 @@ int main(int argc, char* argv[]) {
 
         glDrawElements(GL_TRIANGLES,
                        (GLsizei)objData.indices.size(),
-                       GL_UNSIGNED_SHORT,
+                       GL_UNSIGNED_INT,
                        0);
 
         glfwSwapBuffers(window);
@@ -303,6 +417,7 @@ int main(int argc, char* argv[]) {
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
+    glDeleteTextures(1, &texture);
     glDeleteProgram(program);
 
     glfwTerminate();
