@@ -1,0 +1,38 @@
+# Pyramid OBJ file
+# 5 vertices, 6 faces (4 triangular sides + 1 square base)
+
+# Vertices
+v  0.0  0.5  0.0   # Top vertex
+v -0.5 -0.5  0.5   # Base front-left
+v  0.5 -0.5  0.5   # Base front-right
+v  0.5 -0.5 -0.5   # Base back-right
+v -0.5 -0.5 -0.5   # Base back-left
+
+# Texture coordinates
+vt 0.5 1.0
+vt 0.0 0.0
+vt 1.0 0.0
+
+# Normals (approximate)
+vn  0.0  0.447  0.894  # Front face
+vn  0.894  0.447  0.0  # Right face
+vn  0.0  0.447 -0.894  # Back face
+vn -0.894  0.447  0.0  # Left face
+vn  0.0 -1.0  0.0      # Bottom face
+
+# Faces
+# Front face
+f 1/1/1 2/2/1 3/3/1
+
+# Right face
+f 1/1/2 3/2/2 4/3/2
+
+# Back face
+f 1/1/3 4/2/3 5/3/3
+
+# Left face
+f 1/1/4 5/2/4 2/3/4
+
+# Bottom face (2 triangles)
+f 2/2/5 5/2/5 4/3/5
+f 2/2/5 4/3/5 3/3/5
